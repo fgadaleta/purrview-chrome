@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Pickycat - Settings</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      max-width: 600px;
+      margin: 50px auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+
+    .container {
+      background: white;
+      padding: 30px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+
+    h1 {
+      margin: 0 0 10px 0;
+      color: #1a1a1a;
+    }
+
+    .subtitle {
+      color: #666;
+      margin-bottom: 30px;
+    }
+
+    .setting-group {
+      margin-bottom: 25px;
+    }
+
+    label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: #1a1a1a;
+    }
+
+    input[type="text"],
+    input[type="password"],
+    select {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+      box-sizing: border-box;
+    }
+
+    input[type="checkbox"] {
+      margin-right: 8px;
+    }
+
+    .help-text {
+      font-size: 13px;
+      color: #666;
+      margin-top: 5px;
+    }
+
+    .help-text a {
+      color: #3b82f6;
+      text-decoration: none;
+    }
+
+    .help-text a:hover {
+      text-decoration: underline;
+    }
+
+    button {
+      padding: 12px 24px;
+      background: #1a1a1a;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    button:hover {
+      background: #333;
+    }
+
+    .status {
+      margin-top: 15px;
+      padding: 12px;
+      border-radius: 6px;
+      display: none;
+    }
+
+    .status.success {
+      background: #d4edda;
+      color: #155724;
+      display: block;
+    }
+
+    .status.error {
+      background: #f8d7da;
+      color: #721c24;
+      display: block;
+    }
+
+    .info-box {
+      background: #e7f3ff;
+      border-left: 4px solid #3b82f6;
+      padding: 15px;
+      margin-bottom: 20px;
+      border-radius: 4px;
+    }
+
+    .info-box h3 {
+      margin: 0 0 10px 0;
+      color: #1a1a1a;
+      font-size: 16px;
+    }
+
+    .info-box p {
+      margin: 5px 0;
+      font-size: 14px;
+      color: #333;
+    }
+
+    .provider-info {
+      display: none;
+      margin-top: 10px;
+      padding: 10px;
+      background: #f8f9fa;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+
+    .provider-info.active {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Pickycat Settings</h1>
+    <p class="subtitle">Configure AI-powered analysis</p>
+
+    <div class="info-box">
+      <h3>💡 Recommendation: Use Groq (Free & Fast)</h3>
+      <p>Groq offers free API access with very fast inference speeds - perfect for this extension!</p>
+      <p>Get your free API key at <a href="https://console.groq.com/keys" target="_blank">console.groq.com/keys</a></p>
+    </div>
+
+    <div class="setting-group">
+      <label>
+        <input type="checkbox" id="connectX">
+        Connect X Account (Enables advanced features)
+      </label>
+      <div class="help-text">Allows posting, liking, and accessing private data using your current X session</div>
+      <button id="extractTokenBtn" style="margin-top: 10px; display: none;">Extract Session Tokens</button>
+      <div id="xAccountStatus" style="margin-top: 10px; padding: 10px; border-radius: 4px; display: none;"></div>
+    </div>
+
+    <div class="setting-group">
+      <label>
+        <input type="checkbox" id="useAI">
+        Enable AI Analysis
+      </label>
+      <div class="help-text">When disabled, uses simple keyword detection (free but less accurate)</div>
+    </div>
+
+    <div class="setting-group">
+      <label for="apiProvider">AI Provider:</label>
+      <select id="apiProvider">
+        <option value="groq">Groq (Recommended - Fast & Free tier)</option>
+        <option value="openai">OpenAI (Paid)</option>
+      </select>
+    </div>
+
+    <div id="groqInfo" class="provider-info">
+      <strong>Groq Setup:</strong><br>
+      1. Go to <a href="https://console.groq.com/keys" target="_blank">console.groq.com/keys</a><br>
+      2. Sign up (free tier available)<br>
+      3. Create API key<br>
+      4. Paste below (starts with "gsk_")<br>
+      <br>
+      <strong>Cost:</strong> Free tier includes generous limits!<br>
+      <strong>Speed:</strong> 10x faster than OpenAI
+    </div>
+
+    <div id="openaiInfo" class="provider-info">
+      <strong>OpenAI Setup:</strong><br>
+      1. Go to <a href="https://platform.openai.com/api-keys" target="_blank">platform.openai.com/api-keys</a><br>
+      2. Sign up and add $5-10 credit<br>
+      3. Create API key<br>
+      4. Paste below (starts with "sk-")<br>
+      <br>
+      <strong>Cost:</strong> ~$0.01 per 1000 posts
+    </div>
+
+    <div class="setting-group">
+      <label for="apiKey">API Key:</label>
+      <input type="password" id="apiKey" placeholder="gsk-... or sk-...">
+      <div class="help-text">
+        Your API key is stored locally and only sent to your chosen provider.
+      </div>
+    </div>
+
+    <button id="saveBtn">Save Settings</button>
+
+    <div class="status" id="status"></div>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>
