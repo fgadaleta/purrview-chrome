@@ -15,7 +15,8 @@
     "https://x.com/*",
     "https://api.anthropic.com/*",
     "https://api.x.com/*",
-    "https://api.twitter.com/*"
+    "https://api.twitter.com/*",
+    "https://purrview.amethix.com/*"
   ],
   "action": {
     "default_title": "Toggle Pickycat Sidebar"

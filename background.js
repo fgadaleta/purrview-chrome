@@ -59,15 +59,57 @@ function loadSettings() {
 
 // Listen for messages from content script and options page
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  console.log('Background received message:', request.action);
+
+  // Test ping
+  if (request.action === 'ping') {
+    sendResponse({ pong: true });
+    return false;
+  }
+
   if (request.action === 'analyzePost') {
     console.log('Received post to analyze:', request.text.substring(0, 50) + '...');
     analyzePostBias(request.text);
+    return false;
   } else if (request.action === 'reloadSettings') {
     loadSettings();
+    return false;
   } else if (request.action === 'extractXTokens') {
-    extractXTokens().then(sendResponse);
+    extractXTokens()
+      .then(response => {
+        console.log('Sending extractXTokens response:', response);
+        sendResponse(response);
+      })
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true; // Will respond asynchronously
+  } else if (request.action === 'initiateTwitterLogin') {
+    initiateTwitterLogin()
+      .then(response => {
+        console.log('Sending initiateTwitterLogin response:', response);
+        sendResponse(response);
+      })
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true; // Will respond asynchronously
+  } else if (request.action === 'getTwitterAuthStatus') {
+    getTwitterAuthStatus()
+      .then(response => {
+        console.log('Sending getTwitterAuthStatus response:', response);
+        sendResponse(response);
+      })
+      .catch(err => sendResponse({ isAuthenticated: false, error: err.message }));
+    return true; // Will respond asynchronously
+  } else if (request.action === 'logoutTwitter') {
+    logoutTwitter()
+      .then(response => {
+        console.log('Sending logoutTwitter response:', response);
+        sendResponse(response);
+      })
+      .catch(err => sendResponse({ success: false, error: err.message }));
     return true; // Will respond asynchronously
   }
+
+  console.log('Unknown action:', request.action);
+  return false;
 });
 
 // Listen for extension icon click
@@ -309,4 +351,145 @@ async function updateStats(bias, sentiment = 'neutral', toxicity = 'low') {
       });
     });
   });
+}
+
+// ========== Twitter OAuth Functions ==========
+
+const PURRVIEW_API = 'https://purrview.amethix.com';
+
+// Initiate Twitter OAuth login
+async function initiateTwitterLogin() {
+  try {
+    console.log('Initiating Twitter OAuth login...');
+
+    // Step 1: Get the auth URL from Purrview backend
+    console.log('Fetching auth URL from:', `${PURRVIEW_API}/auth/twitter`);
+    const response = await fetch(`${PURRVIEW_API}/auth/twitter`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+
+    console.log('Response status:', response.status);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('API error response:', errorText);
+      throw new Error(`Failed to get auth URL: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    console.log('Got auth URL from backend:', data);
+
+    if (!data.auth_uri) {
+      throw new Error('No auth_uri in response');
+    }
+
+    // Step 2: Open the Twitter auth URL in a new tab
+    console.log('Opening Twitter auth URL in new tab');
+    const tab = await chrome.tabs.create({ url: data.auth_uri });
+    console.log('Tab created with ID:', tab.id);
+
+    // Step 3: Monitor the tab for callback URL
+    monitorOAuthCallback(tab.id);
+
+    return { success: true, message: 'Opening Twitter login...' };
+  } catch (error) {
+    console.error('Error initiating Twitter login:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+// Monitor tab for OAuth callback
+function monitorOAuthCallback(tabId) {
+  const callbackListener = async (updatedTabId, changeInfo, tab) => {
+    if (updatedTabId !== tabId) return;
+
+    // Check if we've reached the callback URL
+    if (changeInfo.url && changeInfo.url.includes('purrview.amethix.com/auth/twitter/callback')) {
+      console.log('OAuth callback detected:', changeInfo.url);
+
+      try {
+        // Fetch the page to get the JSON response
+        const response = await fetch(changeInfo.url);
+        const data = await response.json();
+
+        if (data.token && data.username) {
+          // Store authentication data
+          await chrome.storage.local.set({
+            twitterAuth: {
+              token: data.token,
+              username: data.username,
+              userId: data.user_id,
+              authenticatedAt: new Date().toISOString(),
+              isAuthenticated: true
+            }
+          });
+
+          console.log('Twitter authentication successful:', data.username);
+
+          // Close the OAuth tab
+          chrome.tabs.remove(tabId);
+
+          // Notify options page if it's open
+          chrome.runtime.sendMessage({
+            action: 'twitterAuthComplete',
+            success: true,
+            username: data.username
+          }).catch(() => {
+            // Options page might not be open, that's okay
+          });
+        }
+      } catch (error) {
+        console.error('Error processing OAuth callback:', error);
+      }
+
+      // Remove listener
+      chrome.tabs.onUpdated.removeListener(callbackListener);
+    }
+  };
+
+  chrome.tabs.onUpdated.addListener(callbackListener);
+
+  // Clean up listener if tab is closed
+  chrome.tabs.onRemoved.addListener((closedTabId) => {
+    if (closedTabId === tabId) {
+      chrome.tabs.onUpdated.removeListener(callbackListener);
+    }
+  });
+}
+
+// Get Twitter authentication status
+async function getTwitterAuthStatus() {
+  try {
+    const result = await chrome.storage.local.get(['twitterAuth']);
+    const authData = result.twitterAuth;
+
+    if (authData && authData.isAuthenticated && authData.token) {
+      return {
+        isAuthenticated: true,
+        username: authData.username,
+        userId: authData.userId,
+        authenticatedAt: authData.authenticatedAt
+      };
+    }
+
+    return { isAuthenticated: false };
+  } catch (error) {
+    console.error('Error getting Twitter auth status:', error);
+    return { isAuthenticated: false, error: error.message };
+  }
+}
+
+// Logout from Twitter
+async function logoutTwitter() {
+  try {
+    await chrome.storage.local.remove(['twitterAuth']);
+    console.log('Twitter logout successful');
+    return { success: true };
+  } catch (error) {
+    console.error('Error during Twitter logout:', error);
+    return { success: false, error: error.message };
+  }
 }

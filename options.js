@@ -20,7 +20,13 @@ document.addEventListener('DOMContentLoaded', () => {
   // Extract X session tokens
   document.getElementById('extractTokenBtn').addEventListener('click', extractXTokens);
 
+  // Twitter OAuth login
+  document.getElementById('twitterLoginBtn').addEventListener('click', handleTwitterLogin);
+
   document.getElementById('saveBtn').addEventListener('click', saveSettings);
+
+  // Check Twitter auth status on load
+  checkTwitterAuthStatus();
 });
 
 // Load saved settings
@@ -146,3 +152,123 @@ function showXAccountStatus(connected, username, errorMsg) {
     statusDiv.textContent = errorMsg || '❌ Not connected';
   }
 }
+
+// ========== Twitter OAuth Functions ==========
+
+// Check Twitter authentication status
+async function checkTwitterAuthStatus() {
+  try {
+    // First, test if background is responding at all
+    chrome.runtime.sendMessage({ action: 'ping' }, (pingResponse) => {
+      console.log('Ping response:', pingResponse, 'Error:', chrome.runtime.lastError);
+
+      // Now try to get auth status
+      chrome.runtime.sendMessage({ action: 'getTwitterAuthStatus' }, (response) => {
+        if (chrome.runtime.lastError) {
+          console.error('Error getting Twitter auth status:', chrome.runtime.lastError);
+          return;
+        }
+
+        if (response && response.isAuthenticated) {
+          showTwitterAuthStatus(true, response.username);
+        } else {
+          showTwitterAuthStatus(false);
+        }
+      });
+    });
+  } catch (error) {
+    console.error('Error checking Twitter auth status:', error);
+  }
+}
+
+// Handle Twitter login button click
+async function handleTwitterLogin() {
+  const btn = document.getElementById('twitterLoginBtn');
+  const btnText = document.getElementById('twitterLoginText');
+
+  // Check if already authenticated
+  chrome.runtime.sendMessage({ action: 'getTwitterAuthStatus' }, (statusResponse) => {
+    if (chrome.runtime.lastError) {
+      console.error('Error checking auth status:', chrome.runtime.lastError);
+      showStatus('error', 'Error checking authentication status');
+      return;
+    }
+
+    if (statusResponse && statusResponse.isAuthenticated) {
+      // Already logged in, offer to logout
+      if (confirm(`You are logged in as @${statusResponse.username}. Do you want to logout?`)) {
+        chrome.runtime.sendMessage({ action: 'logoutTwitter' }, (response) => {
+          if (chrome.runtime.lastError) {
+            console.error('Error during logout:', chrome.runtime.lastError);
+            showStatus('error', 'Error during logout');
+            return;
+          }
+          if (response && response.success) {
+            showTwitterAuthStatus(false);
+            showStatus('success', 'Logged out successfully');
+          }
+        });
+      }
+    } else {
+      // Not logged in, initiate OAuth flow
+      btnText.textContent = 'Opening Twitter...';
+      btn.disabled = true;
+
+      chrome.runtime.sendMessage({ action: 'initiateTwitterLogin' }, (response) => {
+        if (chrome.runtime.lastError) {
+          console.error('Error initiating login:', chrome.runtime.lastError);
+          showStatus('error', 'Error initiating login');
+          btnText.textContent = 'Sign in with X';
+          btn.disabled = false;
+          return;
+        }
+
+        if (response && response.success) {
+          showStatus('success', 'Opening Twitter login in new tab...');
+          // Reset button after a short delay
+          setTimeout(() => {
+            btnText.textContent = 'Sign in with X';
+            btn.disabled = false;
+          }, 3000);
+        } else {
+          showStatus('error', (response && response.error) || 'Failed to initiate login');
+          btnText.textContent = 'Sign in with X';
+          btn.disabled = false;
+        }
+      });
+    }
+  });
+}
+
+// Show Twitter authentication status
+function showTwitterAuthStatus(authenticated, username) {
+  const statusDiv = document.getElementById('twitterAuthStatus');
+  const btn = document.getElementById('twitterLoginBtn');
+  const btnText = document.getElementById('twitterLoginText');
+
+  statusDiv.style.display = 'block';
+
+  if (authenticated) {
+    statusDiv.style.background = '#d4edda';
+    statusDiv.style.color = '#155724';
+    statusDiv.innerHTML = `✅ Authenticated as <strong>@${username}</strong>`;
+    btnText.textContent = 'Logout';
+    btn.style.background = '#dc3545';
+    btn.disabled = false;
+  } else {
+    statusDiv.style.display = 'none';
+    btnText.textContent = 'Sign in with Twitter';
+    btn.style.background = '#1DA1F2';
+    btn.disabled = false;
+  }
+}
+
+// Listen for authentication completion message from background script
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === 'twitterAuthComplete') {
+    if (request.success) {
+      showTwitterAuthStatus(true, request.username);
+      showStatus('success', `Successfully logged in as @${request.username}`);
+    }
+  }
+});
