@@ -412,10 +412,27 @@ function monitorOAuthCallback(tabId) {
 
       try {
         // Fetch the page to get the JSON response
+        console.log('Fetching token from callback URL...');
         const response = await fetch(changeInfo.url);
-        const data = await response.json();
+        console.log('Response status:', response.status);
+        console.log('Response headers:', response.headers.get('content-type'));
+
+        const responseText = await response.text();
+        console.log('Response body (raw text):', responseText);
+        console.log('Response body length:', responseText.length);
+
+        // Parse JSON
+        const data = JSON.parse(responseText);
+        console.log('Parsed data:', data);
+        console.log('Data type:', typeof data);
+        console.log('Data keys:', Object.keys(data));
+        console.log('Token present?', 'token' in data, 'Value:', data.token);
+        console.log('Username present?', 'username' in data, 'Value:', data.username);
+        console.log('User_id present?', 'user_id' in data, 'Value:', data.user_id);
 
         if (data.token && data.username) {
+          console.log('✓ Token and username found in response');
+
           // Store authentication data
           await chrome.storage.local.set({
             twitterAuth: {
@@ -427,7 +444,7 @@ function monitorOAuthCallback(tabId) {
             }
           });
 
-          console.log('Twitter authentication successful:', data.username);
+          console.log('✓ Twitter authentication data saved to storage:', data.username);
 
           // Close the OAuth tab
           chrome.tabs.remove(tabId);
@@ -440,9 +457,15 @@ function monitorOAuthCallback(tabId) {
           }).catch(() => {
             // Options page might not be open, that's okay
           });
+        } else {
+          console.error('❌ Missing token or username in response');
+          console.error('Full data object:', JSON.stringify(data, null, 2));
+          console.error('Token check - exists:', !!data.token, 'truthy:', data.token ? true : false);
+          console.error('Username check - exists:', !!data.username, 'truthy:', data.username ? true : false);
         }
       } catch (error) {
         console.error('Error processing OAuth callback:', error);
+        console.error('Error details:', error.message, error.stack);
       }
 
       // Remove listener

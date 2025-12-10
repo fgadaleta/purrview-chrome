@@ -20,6 +20,7 @@ function checkIfSearchPage() {
 
 // Update search page status
 isSearchPage = checkIfSearchPage();
+let lastSearchQuery = null;
 
 // Listen for URL changes (X is a single-page app)
 let lastUrl = window.location.href;
@@ -27,10 +28,28 @@ setInterval(() => {
   const currentUrl = window.location.href;
   if (currentUrl !== lastUrl) {
     lastUrl = currentUrl;
+    const wasSearchPage = isSearchPage;
     isSearchPage = checkIfSearchPage();
+
     if (isSearchPage) {
-      console.log('Search page detected, will extract tweet IDs');
+      const currentQuery = extractSearchQuery();
+
+      // If query changed, send any pending messages for old query
+      if (lastSearchQuery && currentQuery !== lastSearchQuery && messageBatch.length > 0) {
+        console.log('Search query changed, sending pending messages...');
+        sendBatch(lastSearchQuery);
+      }
+
+      lastSearchQuery = currentQuery;
+      console.log('Search page detected, will extract tweet IDs for query:', currentQuery);
       extractedTweetIds.clear();
+    } else if (wasSearchPage) {
+      // Left search page, send any pending messages
+      if (lastSearchQuery && messageBatch.length > 0) {
+        console.log('Left search page, sending pending messages...');
+        sendBatch(lastSearchQuery);
+      }
+      lastSearchQuery = null;
     }
   }
 }, 1000);
@@ -437,6 +456,12 @@ async function analyzeFeed() {
   retryCount = 0;
   let newPostsFound = 0;
 
+  // Get search query if on search page
+  const searchQuery = isSearchPage ? extractSearchQuery() : null;
+  if (isSearchPage && searchQuery) {
+    console.log(`Processing search results for query: "${searchQuery}"`);
+  }
+
   for (const tweet of tweets) {
     const tweetText = extractTweetText(tweet);
     const author = extractAuthor(tweet);
@@ -476,11 +501,16 @@ async function analyzeFeed() {
 
     newPostsFound++;
 
+    // Send message to Purrview backend if on search page
+    if (isSearchPage && searchQuery && tweetText) {
+      addMessageToBatch(tweetText, searchQuery);
+    }
+
     try {
       chrome.runtime.sendMessage({
         action: 'analyzePost',
         text: tweetText
-      }, (response) => {
+      }, () => {
         if (chrome.runtime.lastError) {
           console.log('Extension context error, message not sent');
         }
@@ -626,6 +656,159 @@ window.addEventListener('scroll', () => {
     console.log('Scroll detected, analyzing new tweets...');
     analyzeFeed();
   }, 1500);
+});
+
+// ============================================
+// PURRVIEW BACKEND INTEGRATION
+// ============================================
+
+// Store messages for batch sending
+let messageBatch = [];
+const BATCH_SIZE = 10; // Send in batches of 10 messages
+const BATCH_TIMEOUT = 5000; // Send batch after 5 seconds even if not full
+let batchTimer = null;
+
+// Extract search query from URL
+function extractSearchQuery() {
+  // Handle different search URL formats
+  // Format 1: /search?q=climate+change&src=...
+  const urlParams = new URLSearchParams(window.location.search);
+  const query = urlParams.get('q');
+
+  if (query) {
+    // Decode and clean the query
+    return decodeURIComponent(query.replace(/\+/g, ' '));
+  }
+
+  return null;
+}
+
+// Send messages to Purrview backend
+async function sendMessagesToPurrview(messages, query) {
+  if (!messages || messages.length === 0) {
+    console.log('No messages to send to Purrview');
+    return;
+  }
+
+  try {
+    // Get authentication token from storage
+    const authData = await new Promise((resolve) => {
+      chrome.storage.local.get(['twitterAuth'], (result) => {
+        resolve(result.twitterAuth || null);
+      });
+    });
+
+    if (!authData || !authData.token) {
+      console.log('Not authenticated with Purrview - skipping message sync');
+      return;
+    }
+
+    console.log(`Sending ${messages.length} messages to Purrview for query: "${query}"`);
+
+    const response = await fetch('https://purrview.amethix.com/records', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authData.token}`
+      },
+      body: JSON.stringify({
+        platform: 'X',
+        query: query,
+        messages: messages
+      })
+    });
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        console.error('Authentication failed - token may be invalid or expired');
+        // Could notify user to re-authenticate
+      } else {
+        console.error(`Failed to send messages to Purrview: ${response.status} ${response.statusText}`);
+      }
+      return;
+    }
+
+    const result = await response.json();
+    console.log('✓ Messages sent to Purrview successfully:', result);
+
+  } catch (error) {
+    console.error('Error sending messages to Purrview:', error);
+  }
+}
+
+// Add message to batch and send when ready
+function addMessageToBatch(message, query) {
+  if (!message || !query) {
+    return;
+  }
+
+  messageBatch.push(message);
+  console.log(`Message added to batch (${messageBatch.length}/${BATCH_SIZE})`);
+
+  // Clear existing timer
+  if (batchTimer) {
+    clearTimeout(batchTimer);
+  }
+
+  // If batch is full, send immediately
+  if (messageBatch.length >= BATCH_SIZE) {
+    sendBatch(query);
+  } else {
+    // Otherwise, set timer to send after timeout
+    batchTimer = setTimeout(() => {
+      sendBatch(query);
+    }, BATCH_TIMEOUT);
+  }
+}
+
+// Send the current batch
+function sendBatch(query) {
+  if (messageBatch.length === 0) {
+    return;
+  }
+
+  const messages = [...messageBatch];
+  messageBatch = [];
+
+  if (batchTimer) {
+    clearTimeout(batchTimer);
+    batchTimer = null;
+  }
+
+  sendMessagesToPurrview(messages, query);
+}
+
+// Send any remaining messages before page unload
+window.addEventListener('beforeunload', () => {
+  if (lastSearchQuery && messageBatch.length > 0) {
+    console.log('Page unloading, sending remaining messages...');
+    // Use sendBeacon for reliable delivery during unload
+    chrome.storage.local.get(['twitterAuth'], (result) => {
+      if (result.twitterAuth && result.twitterAuth.token) {
+        const payload = JSON.stringify({
+          platform: 'X',
+          query: lastSearchQuery,
+          messages: messageBatch
+        });
+
+        // Try to send with fetch first (more reliable in modern browsers)
+        fetch('https://purrview.amethix.com/records', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${result.twitterAuth.token}`
+          },
+          body: payload,
+          keepalive: true // Important for page unload
+        }).catch(() => {
+          // Fallback to sendBeacon if fetch fails
+          navigator.sendBeacon('https://purrview.amethix.com/records', payload);
+        });
+
+        messageBatch = [];
+      }
+    });
+  }
 });
 
 // Create sidebar NOW (at the end, after all functions are defined)
