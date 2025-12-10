@@ -20,7 +20,7 @@ async function initiateTwitterLogin() {
     }
 
     const data = await response.json();
-    return data.auth_uri;
+    return data.auth_url;
   } catch (error) {
     console.error('Error initiating Twitter login:', error);
     throw error;

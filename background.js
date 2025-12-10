@@ -382,13 +382,13 @@ async function initiateTwitterLogin() {
     const data = await response.json();
     console.log('Got auth URL from backend:', data);
 
-    if (!data.auth_uri) {
-      throw new Error('No auth_uri in response');
+    if (!data.auth_url) {
+      throw new Error('No auth_url in response');
     }
 
     // Step 2: Open the Twitter auth URL in a new tab
     console.log('Opening Twitter auth URL in new tab');
-    const tab = await chrome.tabs.create({ url: data.auth_uri });
+    const tab = await chrome.tabs.create({ url: data.auth_url });
     console.log('Tab created with ID:', tab.id);
 
     // Step 3: Monitor the tab for callback URL
